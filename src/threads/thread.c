@@ -74,6 +74,8 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+static int highest_priority_thread (void);
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -242,6 +244,11 @@ thread_unblock (struct thread *t)
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
+
+  ASSERT (!list_empty (&ready_list));
+  if (!intr_context () && 
+      highest_priority_thread () > thread_get_priority ())
+    thread_yield ();
 }
 
 /* Returns the name of the running thread. */
@@ -353,6 +360,9 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+
+  if (highest_priority_thread () > thread_get_priority ())
+    thread_yield ();
 }
 
 /* Returns the current thread's priority. */
@@ -504,7 +514,12 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    {
+      struct list_elem *e = 
+            list_max (&ready_list, cmp_thread_priority, NULL);
+      list_remove (e);
+      return list_entry (e, struct thread, elem); 
+    }
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -593,6 +608,37 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+/* Returns true if there is higher priority of threads in ready_list 
+   than the priority of current thread, false otherwise */
+static int
+highest_priority_thread (void)
+{
+  int priority = PRI_MIN;
+  enum intr_level old_level = intr_disable ();
+  
+  if (!list_empty (&ready_list))
+    {
+      priority = list_entry (
+        list_max (&ready_list, cmp_thread_priority, NULL), 
+        struct thread, elem
+      )->priority;
+    }
+  intr_set_level (old_level); 
+  return priority;
+}
+
+/* Returns true if thread A is lower priority than thread B,
+   false otherwise. */
+bool
+cmp_thread_priority (const struct list_elem *a_, 
+                     const struct list_elem *b_, void *aux UNUSED)
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+
+  return a->priority < b->priority;
+}
 
 /* Returns true if thread A is wake up early than thread B,
    false otherwise. */
