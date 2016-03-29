@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -359,7 +360,16 @@ thread_wakeup (void)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  struct thread *curr = thread_current ();
+  
+  curr->origin_priority = new_priority;
+
+  /* Choose the higher priority in the donated priority 
+     and the origin priority */
+  if (curr->highest_donated_priority > new_priority)
+    curr->priority = curr->highest_donated_priority;
+  else
+    curr->priority = new_priority;
 
   if (highest_priority_thread () > thread_get_priority ())
     thread_yield ();
@@ -487,6 +497,10 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+
+  list_init (&t->locks);
+  t->origin_priority = t->priority;
+
   t->magic = THREAD_MAGIC;
 }
 
