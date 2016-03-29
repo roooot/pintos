@@ -7,6 +7,7 @@ Operating Systems and System Programming for Electrical Engineering (EE415) by J
 
 - Use docker on [pintos-kaist-ee415](https://root.plus:10000/jhlee/dockerfile-pintos) (Recommended)
     - Attach volume `/pintos` with your pintos directory, and commands.
+    
         ``` sh
         docker run -i -t -v <PATH_TO_PINTOS>:/pintos pintos-kaist-ee415 bash
         ```
