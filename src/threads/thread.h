@@ -94,6 +94,13 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    /* Owned by synch.c. */
+    struct list locks;                  /* List of acquiring locks. */
+    struct lock *acquiring_lock;        /* Lock to acquire. */
+    
+    int highest_donated_priority;       /* Highest priority from donation */
+    int origin_priority;                /* Priority before donation. */
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
