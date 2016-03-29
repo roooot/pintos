@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/fixed-point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +24,11 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* Niceness of MLFQ scheduler */
+#define NICE_MAX 20
+#define NICE_DEFAULT 0
+#define NICE_MIN -20
 
 /* A kernel thread or user process.
 
@@ -88,6 +94,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    struct list_elem allelem;           /* List element for all threads list. */
 
     int64_t wakeup;                     /* Tick of wake up */
 
@@ -100,6 +107,10 @@ struct thread
     
     int highest_donated_priority;       /* Highest priority from donation */
     int origin_priority;                /* Priority before donation. */
+
+    /* Owned by thread.c */
+    int nice;                           /* Niceness of MLFQ scheduler */
+    fixedpoint recent_cpu;              /* Amount of CPU time received */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -144,6 +155,13 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+void thread_calculate_load_avg (void);
+void thread_recent_cpu_increase (void);
+void thread_calculate_recent_cpu (void);
+void thread_calculate_recent_cpu_for_all (void);
+void thread_calculate_priority_for_all (void);
+void thread_calculate_priority (void);
 
 bool cmp_thread_priority (const struct list_elem *, 
                           const struct list_elem *, void *);
