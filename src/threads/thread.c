@@ -28,6 +28,9 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* List of sleep threads. */
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -91,6 +94,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+  list_init (&sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -308,6 +312,40 @@ thread_yield (void)
   curr->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
+}
+
+/* Sleep the current thread. The current thread is put to 
+   sleep_list before timer interrupts */
+void 
+thread_sleep (int64_t until)
+{
+  struct thread *curr = thread_current ();
+  enum intr_level old_level;
+
+  old_level = intr_disable ();
+  curr->wakeup = until;
+  list_insert_ordered (&sleep_list, &curr->elem, cmp_thread_wakeup, NULL);
+  thread_block ();
+  intr_set_level (old_level);
+}
+
+/* Wake up threads in sleep_list. */
+void
+thread_wakeup (void)
+{
+  struct thread *t;
+  struct list_elem *e;
+  int64_t ticks = timer_ticks ();
+
+  e = list_begin (&sleep_list);
+  while (e != list_end (&sleep_list))
+    {
+      t = list_entry (e, struct thread, elem);
+      if (ticks < t->wakeup) 
+        break;
+      e = list_remove (e);
+      thread_unblock (t);
+    }
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
@@ -555,3 +593,15 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+/* Returns true if thread A is wake up early than thread B,
+   false otherwise. */
+bool
+cmp_thread_wakeup (const struct list_elem *a_, 
+                         const struct list_elem *b_, void *aux UNUSED)
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+
+  return a->wakeup < b->wakeup;
+}
