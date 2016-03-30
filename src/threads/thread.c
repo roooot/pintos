@@ -87,14 +87,15 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+static int highest_thread_priority (void);
+static int highest_thread_priority_in_locks (struct list *);
+
 static bool cmp_thread_priority (const struct list_elem *a_, 
                                  const struct list_elem *b_, 
                                  void *aux UNUSED);
 static bool cmp_thread_wakeup (const struct list_elem *a_, 
                                const struct list_elem *b_, 
                                void *aux UNUSED);
-static int highest_thread_priority (void);
-static int highest_thread_priority_in_locks (struct list *);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -402,9 +403,10 @@ thread_wakeup (void)
    This performs nested donation. */
 void
 thread_priority_donate (struct thread *t)
-{
-  struct thread *curr = thread_current ();
+{ 
+  if (thread_mlfqs) return;
 
+  struct thread *curr = thread_current ();
   if (curr->priority > t->highest_donated_priority)
     t->highest_donated_priority = curr->priority;
 
@@ -422,6 +424,8 @@ thread_priority_donate (struct thread *t)
 void
 thread_regain_priority_donation (struct thread *t)
 {  
+  if (thread_mlfqs) return;
+
   t->highest_donated_priority = 
     highest_thread_priority_in_locks (&t->locks);
   
