@@ -63,6 +63,9 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 
+/* MLFQS scheduling. */
+#define RECALC_FREQ 4           /* # of timer ticks to recalculation */
+
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
@@ -84,6 +87,12 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+static bool cmp_thread_priority (const struct list_elem *a_, 
+                                 const struct list_elem *b_, 
+                                 void *aux UNUSED);
+static bool cmp_thread_wakeup (const struct list_elem *a_, 
+                               const struct list_elem *b_, 
+                               void *aux UNUSED);
 static int highest_priority_thread (void);
 
 /* Initializes the threading system by transforming the code
@@ -152,6 +161,25 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
+
+  if (thread_mlfqs)
+    {
+      int64_t ticks = timer_ticks ();
+
+      thread_recent_cpu_increase ();
+
+      /* Every second */
+      if (ticks % TIMER_FREQ == 0) 
+        {
+          thread_calculate_load_avg ();
+          thread_calculate_recent_cpu_for_all ();
+          thread_calculate_priority_for_all ();
+        }
+
+      /* Every fourth clock tick */
+      if (ticks % RECALC_FREQ == 0)
+        thread_calculate_priority ();
+    }
 
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
@@ -259,7 +287,6 @@ thread_unblock (struct thread *t)
   t->status = THREAD_READY;
   intr_set_level (old_level);
 
-  ASSERT (!list_empty (&ready_list));
   if (!intr_context () && 
       highest_priority_thread () > thread_get_priority ())
     thread_yield ();
@@ -772,7 +799,7 @@ highest_priority_thread (void)
 
 /* Returns true if thread A is lower priority than thread B,
    false otherwise. */
-bool
+static bool
 cmp_thread_priority (const struct list_elem *a_, 
                      const struct list_elem *b_, void *aux UNUSED)
 {
@@ -784,7 +811,7 @@ cmp_thread_priority (const struct list_elem *a_,
 
 /* Returns true if thread A is wake up early than thread B,
    false otherwise. */
-bool
+static bool
 cmp_thread_wakeup (const struct list_elem *a_, 
                          const struct list_elem *b_, void *aux UNUSED)
 {

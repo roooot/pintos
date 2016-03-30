@@ -163,9 +163,4 @@ void thread_calculate_recent_cpu_for_all (void);
 void thread_calculate_priority_for_all (void);
 void thread_calculate_priority (void);
 
-bool cmp_thread_priority (const struct list_elem *, 
-                          const struct list_elem *, void *);
-bool cmp_thread_wakeup (const struct list_elem *, 
-                        const struct list_elem *, void *);
-
 #endif /* threads/thread.h */

@@ -32,6 +32,9 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+static bool cmp_thread_priority (const struct list_elem *a_, 
+                                 const struct list_elem *b_, 
+                                 void *aux UNUSED);
 static bool cmp_sema_priority (const struct list_elem *a_,
                                const struct list_elem *b_, 
                                void *aux UNUSED);
@@ -399,6 +402,18 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
+}
+
+/* Returns true if thread A is lower priority than thread B,
+   false otherwise. */
+static bool
+cmp_thread_priority (const struct list_elem *a_, 
+                     const struct list_elem *b_, void *aux UNUSED)
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+
+  return a->priority < b->priority;
 }
 
 /* Returns true if semaphore A is lower priority than semaphore B,
