@@ -93,7 +93,8 @@ static bool cmp_thread_priority (const struct list_elem *a_,
 static bool cmp_thread_wakeup (const struct list_elem *a_, 
                                const struct list_elem *b_, 
                                void *aux UNUSED);
-static int highest_priority_thread (void);
+static int highest_thread_priority (void);
+static int highest_thread_priority_in_locks (struct list *);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -247,6 +248,10 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* Run immediately if higher priority */
+  if (t->priority > thread_get_priority ())
+    thread_yield ();
+
   return tid;
 }
 
@@ -286,10 +291,6 @@ thread_unblock (struct thread *t)
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
-
-  if (!intr_context () && 
-      highest_priority_thread () > thread_get_priority ())
-    thread_yield ();
 }
 
 /* Returns the name of the running thread. */
@@ -397,6 +398,39 @@ thread_wakeup (void)
     }
 }
 
+/* Donate priority to the holder thread of lock.
+   This performs nested donation. */
+void
+thread_priority_donate (struct thread *t)
+{
+  struct thread *curr = thread_current ();
+
+  if (curr->priority > t->highest_donated_priority)
+    t->highest_donated_priority = curr->priority;
+
+  if (t->highest_donated_priority > t->priority) 
+    {
+      t->priority = t->highest_donated_priority;
+
+      if (t->acquiring_lock != NULL)
+        thread_priority_donate (t->acquiring_lock->holder);
+    }
+}
+
+/* Whene lock is released, the priority should be rolled back
+   or should be calculate again */
+void
+thread_regain_priority_donation (struct thread *t)
+{  
+  t->highest_donated_priority = 
+    highest_thread_priority_in_locks (&t->locks);
+  
+  if (t->origin_priority > t->highest_donated_priority)
+    t->priority = t->origin_priority;
+  else
+    t->priority = t->highest_donated_priority;
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) 
@@ -412,7 +446,7 @@ thread_set_priority (int new_priority)
   else
     curr->priority = new_priority;
 
-  if (highest_priority_thread () > thread_get_priority ())
+  if (highest_thread_priority () > thread_get_priority ())
     thread_yield ();
 }
 
@@ -730,7 +764,8 @@ schedule_tail (struct thread *prev)
      pull out the rug under itself.  (We don't free
      initial_thread because its memory was not obtained via
      palloc().) */
-  if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) 
+  if (prev != NULL && 
+      prev->status == THREAD_DYING && prev != initial_thread) 
     {
       ASSERT (prev != curr);
       palloc_free_page (prev);
@@ -778,10 +813,11 @@ allocate_tid (void)
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
-/* Returns true if there is higher priority of threads in ready_list 
-   than the priority of current thread, false otherwise */
+/* Returns true if there is higher priority of threads in 
+   ready_list than the priority of current thread, 
+   false otherwise */
 static int
-highest_priority_thread (void)
+highest_thread_priority (void)
 {
   int priority = PRI_MIN;
   enum intr_level old_level = intr_disable ();
@@ -813,10 +849,38 @@ cmp_thread_priority (const struct list_elem *a_,
    false otherwise. */
 static bool
 cmp_thread_wakeup (const struct list_elem *a_, 
-                         const struct list_elem *b_, void *aux UNUSED)
+                   const struct list_elem *b_, void *aux UNUSED)
 {
   const struct thread *a = list_entry (a_, struct thread, elem);
   const struct thread *b = list_entry (b_, struct thread, elem);
 
   return a->wakeup < b->wakeup;
+}
+
+/* Returns the highest priority in locks */
+static int
+highest_thread_priority_in_locks (struct list *list)
+{
+  enum intr_level old_level;
+  int highest = 0;
+  struct list_elem *e, *ee;
+  struct semaphore *sema;
+  struct thread *t;
+
+  for (e = list_begin (list); e != list_end (list); 
+       e = list_next (e))
+    {
+      sema = &list_entry (e, struct lock, elem)->semaphore;
+
+      old_level = intr_disable ();
+      ee = list_max (&sema->waiters, cmp_thread_priority, NULL);
+      intr_set_level (old_level);
+
+      t = list_entry (ee, struct thread, elem);
+
+      if (t->priority > highest)
+        highest = t->priority;
+    }
+
+  return highest;
 }
