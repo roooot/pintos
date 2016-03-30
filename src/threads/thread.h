@@ -110,7 +110,7 @@ struct thread
 
     /* Owned by thread.c */
     int nice;                           /* Niceness of MLFQ scheduler */
-    fixedpoint recent_cpu;              /* Amount of CPU time received */
+    fp_t recent_cpu;                    /* Amount of CPU time received */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -151,16 +151,12 @@ void thread_wakeup (void);
 int thread_get_priority (void);
 void thread_set_priority (int);
 
+void thread_priority_donate (struct thread *);
+void thread_regain_priority_donation (struct thread *);
+
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
-void thread_calculate_load_avg (void);
-void thread_recent_cpu_increase (void);
-void thread_calculate_recent_cpu (void);
-void thread_calculate_recent_cpu_for_all (void);
-void thread_calculate_priority_for_all (void);
-void thread_calculate_priority (void);
 
 #endif /* threads/thread.h */

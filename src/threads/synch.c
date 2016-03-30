@@ -38,7 +38,6 @@ static bool cmp_thread_priority (const struct list_elem *a_,
 static bool cmp_sema_priority (const struct list_elem *a_,
                                const struct list_elem *b_, 
                                void *aux UNUSED);
-static int highest_priority_in_locks (struct list *);
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -128,7 +127,13 @@ sema_up (struct semaphore *sema)
       struct list_elem *e = 
           list_max (&sema->waiters, cmp_thread_priority, NULL);
       list_remove(e);
-      thread_unblock (list_entry (e, struct thread, elem));
+
+      struct thread *t = list_entry (e, struct thread, elem);
+      thread_unblock (t);
+
+      /* Run immediately if higher priority */
+      if (t->priority > thread_current ()->priority)
+        thread_yield ();
     }
   intr_set_level (old_level);
 }
@@ -194,42 +199,6 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
-/* Donate priority to the holder thread of lock.
-   This performs nested donation. */
-static void
-lock_priority_donate (const struct lock *lock)
-{
-  struct thread *holder = lock->holder;
-  struct thread *curr = thread_current ();
-
-  if (curr->priority > holder->highest_donated_priority)
-    holder->highest_donated_priority = curr->priority;
-
-  if (holder->highest_donated_priority > holder->priority) 
-    {
-      holder->priority = holder->highest_donated_priority;
-
-      if (holder->acquiring_lock != NULL)
-        lock_priority_donate (holder->acquiring_lock);
-    }
-}
-
-/* Whene lock is released, the priority should be rolled back
-   or should be calculate again */
-static void
-lock_regain_priority_donation (const struct lock *lock)
-{
-  struct thread *holder = lock->holder;
-  
-  holder->highest_donated_priority = 
-    highest_priority_in_locks (&holder->locks);
-  
-  if (holder->origin_priority > holder->highest_donated_priority)
-    holder->priority = holder->origin_priority;
-  else
-    holder->priority = holder->highest_donated_priority;
-}
-
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -250,7 +219,7 @@ lock_acquire (struct lock *lock)
   curr = thread_current ();
   curr->acquiring_lock = lock;
   if (lock->holder != NULL)
-    lock_priority_donate (lock);
+    thread_priority_donate (lock->holder);
 
   sema_down (&lock->semaphore);
   lock->holder = curr;
@@ -292,7 +261,7 @@ lock_release (struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
 
   list_remove (&lock->elem);
-  lock_regain_priority_donation (lock);
+  thread_regain_priority_donation (lock->holder);
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
@@ -429,31 +398,4 @@ cmp_sema_priority (const struct list_elem *a_,
 
   return cmp_thread_priority (list_front (&a->waiters),
                               list_front (&b->waiters), aux);
-}
-
-/* Returns the highest priority in locks */
-static int
-highest_priority_in_locks (struct list *list)
-{
-  enum intr_level old_level;
-  int highest = 0;
-  struct list_elem *e, *ee;
-  struct semaphore *sema;
-  struct thread *t;
-
-  for (e = list_begin (list); e != list_end (list); e = list_next (e))
-    {
-      sema = &list_entry (e, struct lock, elem)->semaphore;
-
-      old_level = intr_disable ();
-      ee = list_max (&sema->waiters, cmp_thread_priority, NULL);
-      intr_set_level (old_level);
-
-      t = list_entry (ee, struct thread, elem);
-
-      if (t->priority > highest)
-        highest = t->priority;
-    }
-
-  return highest;
 }

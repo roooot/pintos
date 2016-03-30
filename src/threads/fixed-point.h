@@ -5,7 +5,7 @@
 #define Q 14
 #define FRACTION (1<<(Q))
 
-typedef int fixedpoint;
+typedef int fp_t;
 
 #if P + Q != 31
 #error "FATAL ERROR: P + Q != 31."
@@ -13,9 +13,8 @@ typedef int fixedpoint;
 
 #define INT_ADD(x, n) (x) + (n) * (FRACTION)
 #define INT_SUB(x, n) (x) - (n) * (FRACTION)
-#define CONVERT_TO_FP(x) (x) * (FRACTION)
-#define CONVERT_TO_INT_ZERO(x) (x) / (FRACTION)
-#define CONVERT_TO_INT_NEAR(x) ((x) >= 0 ? ((x) + (FRACTION) / 2) / (FRACTION) : ((x) - (FRACTION) / 2) / (FRACTION))
+#define INT_TO_FP(x) (x) * (FRACTION)
+#define FP_TO_INT(x) ((x) >= 0 ? ((x) + (FRACTION) / 2) / (FRACTION) : ((x) - (FRACTION) / 2) / (FRACTION))
 #define FP_MUL(x, y) ((int64_t)(x)) * (y) / (FRACTION)
 #define FP_DIV(x, y) ((int64_t)(x)) * (FRACTION) / (y)
 
