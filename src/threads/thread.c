@@ -97,9 +97,10 @@ static void mlfqs_calculate_recent_cpu_for_all (void);
 static void mlfqs_calculate_priority (struct thread *t);
 static void mlfqs_calculate_priority_for_all (void);
 
+static struct thread *mlfqs_highest_priority_thread (void);
+
 static int highest_thread_priority (void);
 static int highest_thread_priority_in_locks (struct list *);
-static struct thread *mlfqs_highest_priority_thread (void);
 
 static bool cmp_thread_priority (const struct list_elem *a_, 
                                  const struct list_elem *b_, 
@@ -177,6 +178,8 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
+  struct list_elem *e;
+  int64_t ticks = timer_ticks ();
 
   /* Update statistics. */
   if (t == idle_thread)
@@ -188,10 +191,19 @@ thread_tick (void)
   else
     kernel_ticks++;
 
+  /* Wake up threads in sleep_list. */
+  e = list_begin (&sleep_list);
+  while (e != list_end (&sleep_list))
+    {
+      t = list_entry (e, struct thread, elem);
+      if (ticks < t->wakeup) 
+        break;
+      e = list_remove (e);
+      thread_unblock (t);
+    }
+
   if (thread_mlfqs)
     {
-      int64_t ticks = timer_ticks ();
-
       mlfqs_recent_cpu_increase ();
 
       /* Every second */
@@ -421,25 +433,6 @@ thread_sleep (int64_t until)
   intr_set_level (old_level);
 }
 
-/* Wake up threads in sleep_list. */
-void
-thread_wakeup (void)
-{
-  struct thread *t;
-  struct list_elem *e;
-  int64_t ticks = timer_ticks ();
-
-  e = list_begin (&sleep_list);
-  while (e != list_end (&sleep_list))
-    {
-      t = list_entry (e, struct thread, elem);
-      if (ticks < t->wakeup) 
-        break;
-      e = list_remove (e);
-      thread_unblock (t);
-    }
-}
-
 /* Donate priority to the holder thread of lock.
    This performs nested donation. */
 void
@@ -643,6 +636,7 @@ mlfqs_calculate_priority_for_all (void)
   intr_set_level (old_level);
 }
 
+/* highest priority thread in mlfqs */
 static struct thread *
 mlfqs_highest_priority_thread (void)
 {
@@ -912,30 +906,6 @@ highest_thread_priority (void)
   return priority;
 }
 
-/* Returns true if thread A is lower priority than thread B,
-   false otherwise. */
-static bool
-cmp_thread_priority (const struct list_elem *a_, 
-                     const struct list_elem *b_, void *aux UNUSED)
-{
-  const struct thread *a = list_entry (a_, struct thread, elem);
-  const struct thread *b = list_entry (b_, struct thread, elem);
-
-  return a->priority < b->priority;
-}
-
-/* Returns true if thread A is wake up early than thread B,
-   false otherwise. */
-static bool
-cmp_thread_wakeup (const struct list_elem *a_, 
-                   const struct list_elem *b_, void *aux UNUSED)
-{
-  const struct thread *a = list_entry (a_, struct thread, elem);
-  const struct thread *b = list_entry (b_, struct thread, elem);
-
-  return a->wakeup < b->wakeup;
-}
-
 /* Returns the highest priority in locks */
 static int
 highest_thread_priority_in_locks (struct list *list)
@@ -962,4 +932,28 @@ highest_thread_priority_in_locks (struct list *list)
     }
 
   return highest;
+}
+
+/* Returns true if thread A is lower priority than thread B,
+   false otherwise. */
+static bool
+cmp_thread_priority (const struct list_elem *a_, 
+                     const struct list_elem *b_, void *aux UNUSED)
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+
+  return a->priority < b->priority;
+}
+
+/* Returns true if thread A is wake up early than thread B,
+   false otherwise. */
+static bool
+cmp_thread_wakeup (const struct list_elem *a_, 
+                   const struct list_elem *b_, void *aux UNUSED)
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+
+  return a->wakeup < b->wakeup;
 }
