@@ -214,7 +214,7 @@ thread_tick (void)
           mlfqs_calculate_priority_for_all ();
         }
       /* Every fourth clock tick */
-      if (ticks % RECALC_FREQ == 1)
+      else if (ticks % RECALC_FREQ == 0)
         mlfqs_calculate_priority (thread_current ());
     }
 
