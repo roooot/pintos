@@ -4,7 +4,9 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 #include "threads/fixed-point.h"
+
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -26,9 +28,11 @@ typedef int tid_t;
 #define PRI_MAX 63                      /* Highest priority. */
 
 /* Niceness of MLFQ scheduler */
-#define NICE_MAX 20
-#define NICE_DEFAULT 0
-#define NICE_MIN -20
+#define NICE_MIN -20                    /* Lowest nice. */
+#define NICE_DEFAULT 0                  /* Default nice. */
+#define NICE_MAX 20                     /* Highest nice. */
+
+#define FD_OFFSET 2                     /* File description offset. */
 
 /* A kernel thread or user process.
 
@@ -95,7 +99,6 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
-
     int64_t wakeup;                     /* Tick of wake up */
 
     /* Shared between thread.c and synch.c. */
@@ -104,7 +107,6 @@ struct thread
     /* Owned by synch.c. */
     struct list locks;                  /* List of acquiring locks. */
     struct lock *acquiring_lock;        /* Lock to acquire. */
-    
     int highest_donated_priority;       /* Highest priority from donation */
     int origin_priority;                /* Priority before donation. */
 
@@ -115,6 +117,10 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct file *exec;                  /* The executable file of the thread. */
+    struct list files;                  /* A list of open files. */
+    struct process_status* ps;          /* Process status. */
+    struct list children;               /* A list of children process. */
 #endif
 
     /* Owned by thread.c. */

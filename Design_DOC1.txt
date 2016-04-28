@@ -4,7 +4,9 @@
                         |   DESIGN DOCUMENT  |
                         +--------------------+
                                    
----- Team 11 ----
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
 
 Jinhwan Lee <jinhwan.lee@kaist.ac.kr>
 
