@@ -11,10 +11,6 @@
 #include "filesys/file.h"
 #include "devices/input.h"
 
-#ifndef PRINT_DEBUG
-// #define PRINT_DEBUG 1
-#endif
-
 /* Process identifier. */
 typedef int pid_t;
 
@@ -39,9 +35,9 @@ static void      sys_close (int fd);
 
 struct user_file
   {
-    struct file *file;                 /* Pointer to the actual file */
-    fid_t fid;                         /* File identifier */
-    struct list_elem thread_elem;      /* List elem for a thread's file list */
+    struct file *file;                 /* Pointer to the actual file. */
+    fid_t fid;                         /* File identifier. */
+    struct list_elem thread_elem;      /* List elem for a thread's file list. */
   };
 
 static struct lock file_lock;
@@ -364,6 +360,10 @@ sys_seek (int fd, unsigned position)
 {
   struct user_file *f;
 
+#if PRINT_DEBUG
+  printf ("[SYSCALL] SYS_SEEK: fd: %d, position: %u\n", fd, position);
+#endif
+
   f = file_by_fid (fd);
   if (!f)
     sys_exit (-1);
@@ -379,6 +379,10 @@ sys_tell (int fd)
 {
   struct user_file *f;
   unsigned status;
+
+#if PRINT_DEBUG
+  printf ("[SYSCALL] SYS_TELL: fd: %d\n", fd);
+#endif
 
   f = file_by_fid (fd);
   if (!f)
@@ -396,6 +400,10 @@ static void
 sys_close (int fd)
 {
   struct user_file *f;
+
+#if PRINT_DEBUG
+  printf ("[SYSCALL] SYS_CLOSE: fd: %d\n", fd);
+#endif
 
   f = file_by_fid (fd);
 

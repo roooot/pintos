@@ -119,7 +119,7 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct file *exec;                  /* The executable file of the thread. */
     struct list files;                  /* A list of open files. */
-    struct process_status* ps;          /* Process status */
+    struct process_status* ps;          /* Process status. */
     struct list children;               /* A list of children process. */
 #endif
 

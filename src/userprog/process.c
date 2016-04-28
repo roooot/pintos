@@ -24,7 +24,7 @@
 struct program_info {
   char prog_name[16];
   char *args_copy;              /* Pointer to the args data. */
-  struct thread *parent;        /* Parent thread */
+  struct thread *parent;        /* Parent thread. */
   struct semaphore sema_load;   /* Signal when loading is done. */
   bool load_success;            /* Whether it loaded successfully. */
 };
