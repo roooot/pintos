@@ -15,11 +15,23 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+/* Info about the process' name and args. This is only used to pass 
+   auxiliary data between execute() and start()*/
+struct program_info {
+  char prog_name[16];
+  char *args_copy;              /* Pointer to the args data. */
+  struct thread *parent;        /* Parent thread */
+  struct semaphore sema_load;   /* Signal when loading is done. */
+  bool load_success;            /* Whether it loaded successfully. */
+};
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool push_args (char *args, void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -28,43 +40,104 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
-  char *fn_copy;
+  struct program_info *pinfo;
+  char *prog_name;
+  char *save_ptr;
   tid_t tid;
 
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
-    return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  pinfo = (struct program_info *) palloc_get_page (0);
+  if (pinfo == NULL) 
+    {
+      tid = TID_ERROR;
+      goto done;
+    }
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  pinfo->load_success = false;
+  pinfo->parent = thread_current ();
+  sema_init (&pinfo->sema_load, 0);
+
+  pinfo->args_copy = palloc_get_page (0);
+  if (pinfo->args_copy == NULL) 
+    {
+      tid = TID_ERROR;
+      goto done;
+    }
+
+  /* Extract the program name */
+  strlcpy (pinfo->args_copy, file_name, PGSIZE);
+  prog_name = strtok_r (pinfo->args_copy, " ", &save_ptr);
+  strlcpy (pinfo->prog_name, prog_name, strlen (prog_name) + 1);
+  
+  /* Copy the arguments string */
+  strlcpy (pinfo->args_copy, file_name, PGSIZE);
+
+  /* Create a new thread to execute prog_name. */
+  tid = thread_create (pinfo->prog_name, PRI_DEFAULT, start_process, pinfo);
+
+  sema_down (&pinfo->sema_load);
+
+  /* Loading is now complete */
+  if (!pinfo->load_success) 
+    tid = TID_ERROR;
+
+  done: 
+  if (pinfo != NULL) 
+    {
+      if (pinfo->args_copy != NULL)
+        palloc_free_page (pinfo->args_copy);
+      palloc_free_page (pinfo);
+    }
+
   return tid;
 }
 
 /* A thread function that loads a user process and makes it start
    running. */
 static void
-start_process (void *f_name)
+start_process (void *_pinfo)
 {
-  char *file_name = f_name;
+  struct program_info *pinfo = (struct program_info *) _pinfo;
+  struct process_status *ps = NULL;
+  struct thread *t = thread_current ();
   struct intr_frame if_;
   bool success;
+  struct file* file;
+
+  /* Open the file and prevent writes to it while loading */
+  file = filesys_open (pinfo->prog_name);
+  if (file != NULL) file_deny_write (file);
+  t->exec = file;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
 
+  success = load (pinfo->prog_name, &if_.eip, &if_.esp) &&
+            push_args (pinfo->args_copy, &if_.esp) && 
+            (ps = malloc (sizeof (struct process_status))) != NULL;
+  
+  pinfo->load_success = success;
+      
   /* If load failed, quit. */
-  palloc_free_page (file_name);
   if (!success) 
-    thread_exit ();
+    { 
+      sema_up (&pinfo->sema_load);
+
+      thread_exit ();
+    }
+    else 
+    {
+      ps->t = t;
+      ps->tid = t->tid;
+      sema_init (&ps->sema_wait, 0);
+      list_push_back (&pinfo->parent->children, &ps->elem);
+      
+      t->ps = ps;
+
+      sema_up (&pinfo->sema_load);
+    }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -86,9 +159,35 @@ start_process (void *f_name)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  return -1;
+  struct list_elem *e;
+  struct process_status *ps = NULL;
+  struct thread *curr = thread_current ();
+  int status;
+
+  /* Check if tid is one of children */
+  for (e = list_begin (&curr->children); 
+       e != list_end (&curr->children); e = list_next (e))
+  {
+    ps = list_entry (e, struct process_status, elem);
+    if (ps->tid == child_tid)
+      break;
+  }
+
+  /* If not a valid child, or has already been removed, return -1 */
+  if (e == list_end (&curr->children)) return -1;
+
+  /* If still running, wait for a signal */
+  sema_down (&ps->sema_wait);
+  
+  status = ps->exit_status;
+
+  /* Clean up the status struct since it is now dead */
+  list_remove (&ps->elem);
+  free (ps);
+
+  return status;
 }
 
 /* Free the current process's resources. */
@@ -97,6 +196,34 @@ process_exit (void)
 {
   struct thread *curr = thread_current ();
   uint32_t *pd;
+
+  if (curr->ps != NULL) 
+  {
+    printf ("%s: exit(%d)\n", curr->name, curr->ps->exit_status);
+
+    /* Signal to parent who is waiting. */
+    sema_up (&curr->ps->sema_wait);
+
+    /* When parent died first, Child should free process_status */
+    if (curr->ps->parent == NULL)
+      free (curr->ps);
+  }
+
+  /* Kill all the remaining child program_status objects */
+  while (!list_empty (&curr->children))
+  {
+    struct process_status *ps = 
+      list_entry (list_pop_front (&curr->children), 
+                  struct process_status, elem);
+    ps->parent = NULL;
+  }
+  
+  /* Allow writes to the exec file. */
+  if (curr->exec != NULL) 
+  {
+    file_allow_write (curr->exec);
+    file_close (curr->exec);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -130,6 +257,72 @@ process_activate (void)
   /* Set thread's kernel stack for use in processing
      interrupts. */
   tss_update ();
+}
+
+/* Parsing arguments and push arguments into stack */
+static bool
+push_args (char *args, void **esp)
+{
+  int argc = 0;
+  char **argv;
+  char *token, *save_ptr;
+  uint8_t *stack_ptr;
+  bool success = false;
+  int i;
+
+  argv = palloc_get_page (0);
+  if (argv == NULL) 
+    goto done;
+
+  for (token = strtok_r (args, " ", &save_ptr); 
+       token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+    argv[argc++] = token;
+  /* argv[argc] is a null pointer. */
+  argv[argc] = NULL;
+
+  stack_ptr = (*esp);
+
+  /* Copy the words of argv to stack. */
+  for (i = argc - 1; i >= 0; i--)
+    {
+      size_t size = strlen (argv[i]) + 1;
+      stack_ptr -= size;
+      strlcpy (stack_ptr, argv[i], size);
+      argv[i] = stack_ptr;
+    }
+
+  /* Stack pointer word align. */
+  while ((uintptr_t)stack_ptr & 3)
+    *(--stack_ptr) = 0;
+
+  /* Push the elements of argv. */
+  for (i = argc; i >= 0; i--)
+    {
+      stack_ptr -= sizeof (char *);
+      *(char **) stack_ptr = argv[i];
+    }
+
+  /* Push argv. */
+  stack_ptr -= sizeof (char **);
+  *(char ***) stack_ptr = (char **) (stack_ptr + sizeof (char **));
+
+  /* Push argc. */
+  stack_ptr -= sizeof (int);
+  *(int *) stack_ptr = argc;
+
+  /* Push a fake "return address". */
+  stack_ptr -= sizeof (void *);
+  *(void **) stack_ptr = NULL;
+
+  *esp = stack_ptr;
+
+  success = true;
+
+  palloc_free_page (argv);
+
+ done:
+  return success;
 }
 
 /* We load ELF binaries.  The following definitions are taken

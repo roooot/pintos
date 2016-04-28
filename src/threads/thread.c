@@ -375,6 +375,8 @@ thread_tid (void)
 void
 thread_exit (void) 
 {
+  struct thread *curr = thread_current ();
+
   ASSERT (!intr_context ());
 
 #ifdef USERPROG
@@ -384,8 +386,8 @@ thread_exit (void)
   /* Just set our status to dying and schedule another process.
      We will be destroyed during the call to schedule_tail(). */
   intr_disable ();
-  list_remove (&thread_current ()->allelem);
-  thread_current ()->status = THREAD_DYING;
+  list_remove (&curr->allelem);
+  curr->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
 }
@@ -505,7 +507,7 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
   ASSERT (nice >= NICE_MIN && nice <= NICE_MAX);
   thread_current ()->nice = nice;
@@ -749,6 +751,11 @@ init_thread (struct thread *t, const char *name, int priority)
     else
       t->recent_cpu = thread_get_recent_cpu ();
   }
+
+#ifdef USERPROG
+  list_init (&t->children);
+  list_init (&t->files);
+#endif
 
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
