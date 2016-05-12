@@ -2,11 +2,11 @@
 #define THREADS_THREAD_H
 
 #include <debug.h>
+#include <hash.h>
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
 #include "threads/fixed-point.h"
-
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -121,6 +121,10 @@ struct thread
     struct list files;                  /* A list of open files. */
     struct process_status* ps;          /* Process status. */
     struct list children;               /* A list of children process. */
+#endif
+
+#ifdef VM
+    struct hash page_table;             /* Supplemental page table for process */
 #endif
 
     /* Owned by thread.c. */

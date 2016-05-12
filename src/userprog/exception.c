@@ -5,12 +5,20 @@
 #include "userprog/syscall.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#ifdef VM
+#include "threads/vaddr.h"
+#include "vm/page.h"
+#endif
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+
+#ifdef VM
+bool check_stack (struct intr_frame *f, void * fault_addr);
+#endif
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -149,6 +157,14 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+#ifdef VM
+  if (not_present)
+    {
+      if (page_load (fault_addr)) return;
+      if (check_stack (f, fault_addr)) return;
+    }
+#endif
+
   /* Exit when a pointer points to unmapped virtual memory, or
      tries to write to read-only page, or accesses to kernel
      virtual address space by user. */
@@ -166,3 +182,29 @@ page_fault (struct intr_frame *f)
   kill (f);
 }
 
+#ifdef VM
+/* Check to see if we need to extend the stack.  If so, add a page to our
+   supplementary page table and load the page into memory */
+bool
+check_stack (struct intr_frame *f, void * fault_addr)
+{
+  /* Get the stack pointer */
+  void * esp = f->esp;
+
+  /* PUSH and PUSHA fault 4 and 32 below the stack pointer.  
+     Any faults above the stack pointer should extend the stack as well. */
+  if (esp == fault_addr || (esp - 4) == fault_addr 
+      || (esp - 32) == fault_addr 
+      || (fault_addr > esp && fault_addr < PHYS_BASE))
+    {
+      /* Add an entry to our supplementary page table */
+      struct page *p = page_alloc (fault_addr, true);
+      if (p != NULL)
+        return true;
+
+      kill (f);
+    }
+
+  return false;
+}
+#endif
