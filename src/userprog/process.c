@@ -18,6 +18,9 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#ifdef VM
+#include "vm/page.h"
+#endif
 
 /* Info about the process' name and args. This is only used to pass 
    auxiliary data between execute() and start()*/
@@ -114,23 +117,30 @@ start_process (void *_pinfo)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
 
-  success = load (pinfo->prog_name, &if_.eip, &if_.esp) &&
-            push_args (pinfo->args_copy, &if_.esp) && 
-            (ps = malloc (sizeof (struct process_status))) != NULL;
-  
+#ifdef VM
+  success = page_table_init (&t->page_table)
+            && load (pinfo->prog_name, &if_.eip, &if_.esp)
+            && push_args (pinfo->args_copy, &if_.esp)
+            && (ps = malloc (sizeof (struct process_status))) != NULL;
+#else
+  success = load (pinfo->prog_name, &if_.eip, &if_.esp)
+            && push_args (pinfo->args_copy, &if_.esp)
+            && (ps = malloc (sizeof (struct process_status))) != NULL;
+#endif
+
   pinfo->load_success = success;
       
   /* If load failed, quit. */
   if (!success) 
     { 
       sema_up (&pinfo->sema_load);
-
       thread_exit ();
     }
     else 
     {
       ps->t = t;
       ps->tid = t->tid;
+      ps->parent = pinfo->parent;
       sema_init (&ps->sema_wait, 0);
       list_push_back (&pinfo->parent->children, &ps->elem);
       
@@ -204,7 +214,7 @@ process_exit (void)
     /* Signal to parent who is waiting. */
     sema_up (&curr->ps->sema_wait);
 
-    /* When parent died first, Child should free process_status */
+    /* When parent died first, child should free process_status */
     if (curr->ps->parent == NULL)
       free (curr->ps);
   }
@@ -217,6 +227,10 @@ process_exit (void)
                   struct process_status, elem);
     ps->parent = NULL;
   }
+
+#ifdef VM
+  page_table_destroy (&curr->page_table);
+#endif
   
   /* Allow writes to the exec file. */
   if (curr->exec != NULL) 
@@ -589,6 +603,21 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
+#ifdef VM
+      struct page *p = page_alloc (upage, writable);
+      if (p == NULL)
+        return false;
+
+      uint8_t *kpage = p->frame->kaddr;
+
+      /* Load this page. */
+      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+        {
+          page_free (p);
+          return false; 
+        }
+      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+#else
       /* Get a page of memory. */
       uint8_t *kpage = palloc_get_page (PAL_USER);
       if (kpage == NULL)
@@ -608,12 +637,14 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           palloc_free_page (kpage);
           return false; 
         }
+#endif
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
     }
+
   return true;
 }
 
@@ -622,6 +653,15 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
+#ifdef VM
+  struct page *p = page_alloc (((uint8_t *) PHYS_BASE) - PGSIZE, true);
+  if (p == NULL)
+    return false;
+
+  *esp = PHYS_BASE;
+
+  return true;
+#else
   uint8_t *kpage;
   bool success = false;
 
@@ -634,7 +674,9 @@ setup_stack (void **esp)
       else
         palloc_free_page (kpage);
     }
+
   return success;
+#endif
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
