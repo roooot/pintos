@@ -153,7 +153,8 @@ sys_exit (int status)
       sys_close (list_entry (e, struct user_file, thread_elem)->fid);
     }
 
-  t->ps->exit_status = status;
+  if (t->ps != NULL)
+    t->ps->exit_status = status;
   thread_exit ();
 }
 

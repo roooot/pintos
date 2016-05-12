@@ -131,6 +131,7 @@ start_process (void *_pinfo)
     {
       ps->t = t;
       ps->tid = t->tid;
+      ps->parent = pinfo->parent;
       sema_init (&ps->sema_wait, 0);
       list_push_back (&pinfo->parent->children, &ps->elem);
       
