@@ -131,8 +131,6 @@ thread_init (void)
   list_init (&sleep_list);
   list_init (&all_list);
 
-  // TODO : REMOVE HERE !!
-  list_init (&ready_list);
   if (!thread_mlfqs) 
     {
       list_init (&ready_list);

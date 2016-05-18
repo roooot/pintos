@@ -155,6 +155,7 @@ sys_exit (int status)
 
   if (t->ps != NULL)
     t->ps->exit_status = status;
+  
   thread_exit ();
 }
 

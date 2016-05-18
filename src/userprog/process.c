@@ -76,7 +76,7 @@ process_execute (const char *file_name)
 
   sema_down (&pinfo->sema_load);
 
-  /* Loading is now complete */
+  /* Wait for finishing children's loading. */
   if (!pinfo->load_success) 
     tid = TID_ERROR;
 
@@ -105,29 +105,14 @@ start_process (void *_pinfo)
 
   /* Open the file and prevent writes to it while loading */
   file = filesys_open (pinfo->prog_name);
-  if (file != NULL) file_deny_write (file);
+  if (file != NULL) 
+    file_deny_write (file);
   t->exec = file;
 
-  /* Initialize interrupt frame and load executable. */
-  memset (&if_, 0, sizeof if_);
-  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-  if_.cs = SEL_UCSEG;
-  if_.eflags = FLAG_IF | FLAG_MBS;
+  /* Initialize programe_status */
+  ps = malloc (sizeof (struct process_status));
 
-  success = load (pinfo->prog_name, &if_.eip, &if_.esp) &&
-            push_args (pinfo->args_copy, &if_.esp) && 
-            (ps = malloc (sizeof (struct process_status))) != NULL;
-  
-  pinfo->load_success = success;
-      
-  /* If load failed, quit. */
-  if (!success) 
-    { 
-      sema_up (&pinfo->sema_load);
-
-      thread_exit ();
-    }
-    else 
+  if (ps != NULL)
     {
       ps->t = t;
       ps->tid = t->tid;
@@ -136,10 +121,31 @@ start_process (void *_pinfo)
       list_push_back (&pinfo->parent->children, &ps->elem);
       
       t->ps = ps;
-
-      sema_up (&pinfo->sema_load);
     }
 
+  /* Initialize interrupt frame and load executable. */
+  memset (&if_, 0, sizeof if_);
+  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+  if_.cs = SEL_UCSEG;
+  if_.eflags = FLAG_IF | FLAG_MBS;
+
+  success = ps != NULL 
+            && load (pinfo->prog_name, &if_.eip, &if_.esp) 
+            && push_args (pinfo->args_copy, &if_.esp);;
+  
+  pinfo->load_success = success;
+
+  /* Signal to parent thread. */
+  sema_up (&pinfo->sema_load);
+      
+  /* If load failed, quit. */
+  if (!success) 
+    {
+      if (ps != NULL) 
+        ps->exit_status = -1;
+      thread_exit ();
+    }
+    
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
