@@ -120,7 +120,8 @@ struct thread
     struct file *exec;                  /* The executable file of the thread. */
     struct list files;                  /* A list of open files. */
     struct process_status* ps;          /* Process status. */
-    struct list children;               /* A list of children process. */
+    struct list children_list;          /* A list of children process. */
+    struct lock children_lock;          /* Lock of children process list. */
 #endif
 
     /* Owned by thread.c. */

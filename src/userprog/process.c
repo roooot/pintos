@@ -118,7 +118,10 @@ start_process (void *_pinfo)
       ps->tid = t->tid;
       ps->parent = pinfo->parent;
       sema_init (&ps->sema_wait, 0);
-      list_push_back (&pinfo->parent->children, &ps->elem);
+
+      lock_acquire (&pinfo->parent->children_lock);
+      list_push_back (&pinfo->parent->children_list, &ps->elem);
+      lock_release (&pinfo->parent->children_lock);
       
       t->ps = ps;
     }
@@ -145,7 +148,7 @@ start_process (void *_pinfo)
         ps->exit_status = -1;
       thread_exit ();
     }
-    
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -174,8 +177,9 @@ process_wait (tid_t child_tid)
   int status;
 
   /* Check if tid is one of children */
-  for (e = list_begin (&curr->children); 
-       e != list_end (&curr->children); e = list_next (e))
+  lock_acquire (&curr->children_lock);
+  for (e = list_begin (&curr->children_list); 
+       e != list_end (&curr->children_list); e = list_next (e))
   {
     ps = list_entry (e, struct process_status, elem);
     if (ps->tid == child_tid)
@@ -183,7 +187,12 @@ process_wait (tid_t child_tid)
   }
 
   /* If not a valid child, or has already been removed, return -1 */
-  if (e == list_end (&curr->children)) return -1;
+  if (e == list_end (&curr->children_list)) 
+    {
+      lock_release (&curr->children_lock);
+      return -1;
+    }
+  lock_release (&curr->children_lock);
 
   /* If still running, wait for a signal */
   sema_down (&ps->sema_wait);
@@ -217,13 +226,15 @@ process_exit (void)
   }
 
   /* Kill all the remaining child program_status objects */
-  while (!list_empty (&curr->children))
+  lock_acquire (&curr->children_lock);
+  while (!list_empty (&curr->children_list))
   {
     struct process_status *ps = 
-      list_entry (list_pop_front (&curr->children), 
+      list_entry (list_pop_front (&curr->children_list), 
                   struct process_status, elem);
     ps->parent = NULL;
   }
+  lock_release (&curr->children_lock);
   
   /* Allow writes to the exec file. */
   if (curr->exec != NULL) 
@@ -256,10 +267,10 @@ process_exit (void)
 void
 process_activate (void)
 {
-  struct thread *t = thread_current ();
+  struct thread *curr = thread_current ();
 
   /* Activate thread's page tables. */
-  pagedir_activate (t->pagedir);
+  pagedir_activate (curr->pagedir);
 
   /* Set thread's kernel stack for use in processing
      interrupts. */

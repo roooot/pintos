@@ -751,7 +751,8 @@ init_thread (struct thread *t, const char *name, int priority)
   }
 
 #ifdef USERPROG
-  list_init (&t->children);
+  list_init (&t->children_list);
+  lock_init (&t->children_lock);
   list_init (&t->files);
 #endif
 

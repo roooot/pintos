@@ -50,10 +50,10 @@ static struct user_file *file_by_fid (int fid);
 void
 syscall_init (void) 
 {
-  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-
   lock_init (&file_lock);
   list_init (&file_list);
+
+  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
 /* Syscall handler calls the appropriate function. */
@@ -135,27 +135,26 @@ sys_halt (void)
 static void
 sys_exit (int status)
 {
-  struct thread *t;
+  struct thread *curr = thread_current ();
   struct list_elem *e;
 
 #if PRINT_DEBUG
   printf ("[SYSCALL] SYS_EXIT\n");
 #endif
 
-  t = thread_current ();
   if (lock_held_by_current_thread (&file_lock))
     lock_release (&file_lock);
 
   /* Close all opened files of the thread. */
-  while (!list_empty (&t->files) )
+  while (!list_empty (&curr->files) )
     {
-      e = list_begin (&t->files);
+      e = list_begin (&curr->files);
       sys_close (list_entry (e, struct user_file, thread_elem)->fid);
     }
 
-  if (t->ps != NULL)
-    t->ps->exit_status = status;
-  
+  if (curr->ps != NULL)
+    curr->ps->exit_status = status;
+
   thread_exit ();
 }
 
@@ -294,7 +293,9 @@ sys_read (int fd, void *buffer, unsigned size)
   printf ("[SYSCALL] SYS_READ: fd: %d, buffer: %p, size: %u\n", fd, buffer, size);
 #endif
 
-  if (fd == STDIN_FILENO)
+  if (!is_user_vaddr (buffer) || !is_user_vaddr (buffer + size))
+    sys_exit (-1);
+  else if (fd == STDIN_FILENO)
     {
       unsigned i;
       for (i = 0; i < size; ++i)
@@ -303,8 +304,6 @@ sys_read (int fd, void *buffer, unsigned size)
     }
   else if (fd == STDOUT_FILENO)
     ret = -1;
-  else if (!is_user_vaddr (buffer) || !is_user_vaddr (buffer + size))
-    sys_exit (-1);
   else
     {
       f = file_by_fid (fd);
@@ -332,15 +331,15 @@ sys_write (int fd, const void *buffer, unsigned size)
   printf ("[SYSCALL] SYS_WRITE: fd: %d, buffer: %p, size: %u\n", fd, buffer, size);
 #endif
 
-  if (fd == STDIN_FILENO)
+  if (!is_user_vaddr (buffer) || !is_user_vaddr (buffer + size))
+    sys_exit (-1);
+  else if (fd == STDIN_FILENO)
     ret = -1;
   else if (fd == STDOUT_FILENO)
     {
       putbuf (buffer, size);
       ret = size;
     }
-  else if (!is_user_vaddr (buffer) || !is_user_vaddr (buffer + size))
-    sys_exit (-1);
   else
     {
       f = file_by_fid (fd);
@@ -353,6 +352,7 @@ sys_write (int fd, const void *buffer, unsigned size)
           lock_release (&file_lock);
         }
     }
+
   return ret;
 }
 
@@ -367,7 +367,7 @@ sys_seek (int fd, unsigned position)
 #endif
 
   f = file_by_fid (fd);
-  if (!f)
+  if (f == NULL)
     sys_exit (-1);
 
   lock_acquire (&file_lock);
@@ -387,7 +387,7 @@ sys_tell (int fd)
 #endif
 
   f = file_by_fid (fd);
-  if (!f)
+  if (f == NULL)
     sys_exit (-1);
 
   lock_acquire (&file_lock);
@@ -408,7 +408,6 @@ sys_close (int fd)
 #endif
 
   f = file_by_fid (fd);
-
   if (f == NULL)
     sys_exit (-1);
 
@@ -434,7 +433,7 @@ allocate_fid (void)
   fid_t ret_fid;
   
   lock_acquire (&file_lock);
-   ret_fid = next_fid++;
+  ret_fid = next_fid++;
   lock_release (&file_lock);
 
   return ret_fid;
@@ -445,10 +444,9 @@ static struct user_file *
 file_by_fid (int fid)
 {
   struct list_elem *e;
-  struct thread *t;
+  struct thread *curr = thread_current();
 
-  t = thread_current();
-  for (e = list_begin (&t->files); e != list_end (&t->files);
+  for (e = list_begin (&curr->files); e != list_end (&curr->files);
        e = list_next (e))
     {
       struct user_file *f = list_entry (e, struct user_file, thread_elem);
